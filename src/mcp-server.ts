@@ -25,6 +25,7 @@ import {
   getPostDetailsSchema,
   userAnalysisSchema,
   monitorSubredditsSchema,
+  getSubredditWikiSchema,
   redditExplainSchema,
 } from './tools/index.js';
 
@@ -228,6 +229,12 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
       readOnlyHint: true
     },
     {
+      name: 'get_subreddit_wiki',
+      description: 'Fetch a subreddit wiki page. Many subreddits have valuable structured guides, FAQs, and rules in their wikis. Common pages: "index" (main), "faq", "rules", "config/sidebar".',
+      inputSchema: zodSchemaToMCPInputSchema(getSubredditWikiSchema, 'get_subreddit_wiki'),
+      readOnlyHint: true
+    },
+    {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
@@ -271,6 +278,11 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
         case 'monitor_subreddits':
           result = await tools.monitorSubreddits(
             monitorSubredditsSchema.parse(args)
+          );
+          break;
+        case 'get_subreddit_wiki':
+          result = await tools.getSubredditWiki(
+            getSubredditWikiSchema.parse(args)
           );
           break;
         case 'reddit_explain':

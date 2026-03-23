@@ -319,6 +319,27 @@ export class RedditAPI {
   }
 
   /**
+   * Get subreddit wiki page
+   */
+  async getWiki(subreddit: string, page: string = 'index'): Promise<any> {
+    const cacheKey = CacheManager.createKey('wiki', subreddit, page);
+
+    const cached = this.cache.get<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const data = await this.get<{ data: any }>(
+      `/r/${subreddit}/wiki/${page}.json`
+    );
+
+    const wiki = data.data;
+    this.cache.set(cacheKey, wiki);
+
+    return wiki;
+  }
+
+  /**
    * Get trending subreddits
    */
   async getTrending(): Promise<string[]> {

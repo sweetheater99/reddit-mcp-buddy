@@ -15,6 +15,7 @@ export const browseSubredditSchema = z.object({
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Change ONLY IF user specifies.'),
   include_nsfw: z.boolean().optional().default(false),
   include_subreddit_info: z.boolean().optional().default(false).describe('Include subreddit metadata like subscriber count and description'),
+  compact: z.boolean().optional().default(false).describe('Return compact output (title, score, comments, permalink only) to save context window'),
 });
 
 export const searchRedditSchema = z.object({
@@ -25,6 +26,7 @@ export const searchRedditSchema = z.object({
   limit: z.number().min(1).max(100).optional().default(25).describe('Default 25, range (1-100). Override ONLY IF user requests.'),
   author: z.string().optional(),
   flair: z.string().optional(),
+  compact: z.boolean().optional().default(false).describe('Return compact output (title, score, comments, permalink only) to save context window'),
 });
 
 export const getPostDetailsSchema = z.object({
@@ -58,6 +60,11 @@ export const monitorSubredditsSchema = z.object({
   deduplicate: z.boolean().optional().default(true).describe('Remove cross-posted duplicates based on URL'),
 });
 
+export const getSubredditWikiSchema = z.object({
+  subreddit: z.string().describe('Subreddit name without r/ prefix'),
+  page: z.string().optional().default('index').describe('Wiki page name (default "index" for the main wiki page). Common pages: "index", "faq", "rules", "config/sidebar"'),
+});
+
 export const redditExplainSchema = z.object({
   term: z.string().describe('Reddit term to explain (e.g., "karma", "cake day", "AMA")'),
 });
@@ -65,6 +72,18 @@ export const redditExplainSchema = z.object({
 /**
  * Tool implementations
  */
+// Helper to create compact post representation
+function toCompactPost(post: any) {
+  return {
+    title: post.title,
+    score: post.score,
+    comments: post.num_comments,
+    permalink: post.permalink,
+    subreddit: post.subreddit,
+    flair: post.link_flair_text,
+  };
+}
+
 export class RedditTools {
   constructor(private api: RedditAPI) {}
 
@@ -106,7 +125,7 @@ export class RedditTools {
     }));
 
     let result: any = {
-      posts,
+      posts: params.compact ? posts.map(p => toCompactPost(p)) : posts,
       total_posts: posts.length
     };
 
@@ -232,7 +251,7 @@ export class RedditTools {
     }));
 
     return {
-      results: posts,
+      results: params.compact ? posts.map(p => toCompactPost(p)) : posts,
       total_results: posts.length
     };
   }
@@ -512,6 +531,36 @@ export class RedditTools {
         deduplicated: params.deduplicate,
       },
     };
+  }
+
+  async getSubredditWiki(params: z.infer<typeof getSubredditWikiSchema>) {
+    try {
+      const wiki = await this.api.getWiki(params.subreddit, params.page);
+
+      return {
+        subreddit: params.subreddit,
+        page: params.page,
+        content: wiki.content_md?.substring(0, 5000) || wiki.content_html?.substring(0, 5000) || 'No content found',
+        revision_by: wiki.revision_by?.data?.name,
+        revision_date: wiki.revision_date ? new Date(wiki.revision_date * 1000).toISOString() : null,
+      };
+    } catch (error: any) {
+      if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+        return {
+          subreddit: params.subreddit,
+          page: params.page,
+          error: 'Wiki is private or restricted. This subreddit does not allow public wiki access.',
+        };
+      }
+      if (error.message?.includes('404')) {
+        return {
+          subreddit: params.subreddit,
+          page: params.page,
+          error: `Wiki page "${params.page}" not found. Try "index", "faq", or "rules".`,
+        };
+      }
+      throw error;
+    }
   }
 
   async redditExplain(params: z.infer<typeof redditExplainSchema>) {
