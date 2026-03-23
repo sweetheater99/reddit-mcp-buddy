@@ -47,6 +47,17 @@ export const userAnalysisSchema = z.object({
 });
 
 
+export const monitorSubredditsSchema = z.object({
+  subreddits: z.array(z.string()).min(1).max(10).describe('List of subreddit names without r/ prefix (e.g., ["awardtravel", "churning", "creditcards"])'),
+  keywords: z.array(z.string()).optional().describe('Optional keywords to filter posts by (matches title or content, case-insensitive)'),
+  sort: z.enum(['hot', 'new', 'top', 'rising']).optional().default('new'),
+  time: z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).optional().default('day'),
+  limit_per_sub: z.number().min(1).max(25).optional().default(10).describe('Posts to fetch per subreddit (default 10, max 25)'),
+  min_score: z.number().optional().default(0).describe('Minimum post score to include'),
+  include_nsfw: z.boolean().optional().default(false),
+  deduplicate: z.boolean().optional().default(true).describe('Remove cross-posted duplicates based on URL'),
+});
+
 export const redditExplainSchema = z.object({
   term: z.string().describe('Reddit term to explain (e.g., "karma", "cake day", "AMA")'),
 });
@@ -412,6 +423,96 @@ export class RedditTools {
 
 
 
+
+  async monitorSubreddits(params: z.infer<typeof monitorSubredditsSchema>) {
+    // Fetch posts from all subreddits in parallel
+    const fetchPromises = params.subreddits.map(sub =>
+      this.api.browseSubreddit(sub, params.sort, {
+        limit: params.limit_per_sub,
+        time: params.time,
+      }).catch(error => {
+        console.error(`Failed to fetch r/${sub}: ${error}`);
+        return null;
+      })
+    );
+
+    const results = await Promise.all(fetchPromises);
+
+    // Collect all posts with subreddit source
+    let allPosts: any[] = [];
+    const failedSubs: string[] = [];
+
+    results.forEach((listing, index) => {
+      const sub = params.subreddits[index];
+      if (!listing) {
+        failedSubs.push(sub);
+        return;
+      }
+
+      const posts = listing.data.children
+        .filter(child => params.include_nsfw || !child.data.over_18)
+        .filter(child => child.data.score >= (params.min_score ?? 0))
+        .map(child => {
+          const ageSeconds = Math.floor(Date.now() / 1000) - child.data.created_utc;
+          const ageHours = Math.max(ageSeconds / 3600, 0.1); // Avoid division by zero
+          return {
+            id: child.data.id,
+            title: child.data.title,
+            author: child.data.author,
+            score: child.data.score,
+            upvote_ratio: child.data.upvote_ratio,
+            num_comments: child.data.num_comments,
+            created_utc: child.data.created_utc,
+            age_hours: Math.round(ageHours * 10) / 10,
+            velocity: Math.round((child.data.score / ageHours) * 10) / 10, // score per hour
+            url: child.data.url,
+            permalink: `https://reddit.com${child.data.permalink}`,
+            subreddit: child.data.subreddit,
+            is_text_post: child.data.is_self,
+            content: child.data.selftext?.substring(0, 300),
+            link_flair_text: child.data.link_flair_text,
+          };
+        });
+
+      allPosts.push(...posts);
+    });
+
+    // Filter by keywords if provided
+    if (params.keywords && params.keywords.length > 0) {
+      const lowerKeywords = params.keywords.map(k => k.toLowerCase());
+      allPosts = allPosts.filter(post => {
+        const text = `${post.title} ${post.content || ''}`.toLowerCase();
+        return lowerKeywords.some(kw => text.includes(kw));
+      });
+    }
+
+    // Deduplicate cross-posts by URL
+    if (params.deduplicate) {
+      const seen = new Set<string>();
+      allPosts = allPosts.filter(post => {
+        // For text posts, use permalink as key; for link posts, use url
+        const key = post.is_text_post ? post.permalink : post.url;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    // Sort by velocity (engagement per hour) descending
+    allPosts.sort((a, b) => b.velocity - a.velocity);
+
+    return {
+      posts: allPosts,
+      total_posts: allPosts.length,
+      subreddits_fetched: params.subreddits.length - failedSubs.length,
+      ...(failedSubs.length > 0 && { failed_subreddits: failedSubs }),
+      filters_applied: {
+        keywords: params.keywords || [],
+        min_score: params.min_score,
+        deduplicated: params.deduplicate,
+      },
+    };
+  }
 
   async redditExplain(params: z.infer<typeof redditExplainSchema>) {
     // This would ideally use a knowledge base, but we'll provide common explanations

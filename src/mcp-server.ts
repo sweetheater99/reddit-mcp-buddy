@@ -24,6 +24,7 @@ import {
   searchRedditSchema,
   getPostDetailsSchema,
   userAnalysisSchema,
+  monitorSubredditsSchema,
   redditExplainSchema,
 } from './tools/index.js';
 
@@ -221,6 +222,12 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
       readOnlyHint: true
     },
     {
+      name: 'monitor_subreddits',
+      description: 'Monitor multiple subreddits at once with optional keyword filtering. Aggregates posts across communities, deduplicates cross-posts, and ranks by engagement velocity (score/hour). Ideal for tracking topics across related subreddits.',
+      inputSchema: zodSchemaToMCPInputSchema(monitorSubredditsSchema, 'monitor_subreddits'),
+      readOnlyHint: true
+    },
+    {
       name: 'reddit_explain',
       description: 'Get explanations of Reddit terms, slang, and culture. Returns definition, origin, usage, and examples.',
       inputSchema: zodSchemaToMCPInputSchema(redditExplainSchema, 'reddit_explain'),
@@ -259,6 +266,11 @@ Rate limits: ${rateLimit} requests/minute. Cache TTL: ${cacheTTL / 60000} minute
         case 'user_analysis':
           result = await tools.userAnalysis(
             userAnalysisSchema.parse(args)
+          );
+          break;
+        case 'monitor_subreddits':
+          result = await tools.monitorSubreddits(
+            monitorSubredditsSchema.parse(args)
           );
           break;
         case 'reddit_explain':
